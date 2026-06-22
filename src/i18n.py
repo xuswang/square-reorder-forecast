@@ -430,8 +430,8 @@ def localize_dataframe(
     return out.rename(columns=rename)
 
 
-def reorder_qty_col(lang: str) -> str:
-    return t("col_reorder", lang)
+def reorder_qty_col(lang: str, forecast_days: int) -> str:
+    return t("col_reorder", lang, days=forecast_days)
 
 
 def product_col(lang: str) -> str:

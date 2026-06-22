@@ -23,7 +23,6 @@ from src.i18n import (
     priority_from_display,
     priority_label,
     product_col,
-    reorder_qty_col,
     t,
 )
 from src.order_export import build_must_order_df, build_must_order_excel_bytes, save_must_order_excel
@@ -423,7 +422,7 @@ def render_charts(
     lang: str,
 ) -> None:
     display_df = localize_dataframe(df, lang, history_days, forecast_days)
-    reorder_col = reorder_qty_col(lang)
+    reorder_col = t("col_reorder", lang, days=forecast_days)
     priority_col_name = priority_col(lang)
     product_col_name = product_col(lang)
     forecast_col_name = forecast_col_display(lang, forecast_days)
