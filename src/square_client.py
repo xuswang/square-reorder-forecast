@@ -18,6 +18,7 @@ from config import Settings
 class CatalogMeta:
     name: str
     for_sale: bool
+    sku: str = ""
 
 
 def _check_errors(response: Any, context: str) -> None:
@@ -217,6 +218,7 @@ def fetch_catalog_metadata(
                         meta[var.id] = CatalogMeta(
                             name=_variation_display_name(parent_name, var),
                             for_sale=_is_for_sale(var, obj, location_id),
+                            sku=_merchant_sku(var),
                         )
 
             elif obj.type == "ITEM_VARIATION" and obj.item_variation_data:
@@ -226,6 +228,7 @@ def fetch_catalog_metadata(
                 meta[obj.id] = CatalogMeta(
                     name=_variation_display_name(parent_name, obj),
                     for_sale=_is_for_sale(obj, parent, location_id),
+                    sku=_merchant_sku(obj),
                 )
 
     return meta
@@ -275,6 +278,15 @@ def _is_for_sale(variation: Any, parent_item: Any | None, location_id: str | Non
                 return False
 
     return True
+
+
+def _merchant_sku(var_obj: Any) -> str:
+    """Square 商品里商家填写的 SKU；仅纯数字，否则留空。"""
+    vd = var_obj.item_variation_data
+    if not vd or not vd.sku:
+        return ""
+    sku = str(vd.sku).strip()
+    return sku if sku.isdigit() else ""
 
 
 def _variation_display_name(parent_name: str, var_obj: Any) -> str:

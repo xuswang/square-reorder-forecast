@@ -22,6 +22,14 @@ SHIPPING_OPTIONS = {
 }
 
 
+def _format_days_left(val: object) -> object:
+    if val is None:
+        return ""
+    if isinstance(val, float) and pd.isna(val):
+        return ""
+    return val
+
+
 def build_must_order_df(df: pd.DataFrame, lang: str) -> pd.DataFrame:
     """筛选必须立即下单的商品（紧急/高优先级，或库存≤0）。"""
     if df.empty:
@@ -42,8 +50,9 @@ def build_must_order_df(df: pd.DataFrame, lang: str) -> pd.DataFrame:
     return pd.DataFrame(
         {
             t("mo_col_product", lang): subset["商品名称"],
-            t("mo_col_sku", lang): subset["SKU_ID"],
+            t("mo_col_sku", lang): subset["SKU"],
             t("mo_col_stock", lang): subset["当前库存"],
+            t("mo_col_days_left", lang): subset["库存可售天数"].apply(_format_days_left),
             t("mo_col_reorder", lang): subset["建议进货量"],
             t("mo_col_priority", lang): subset["优先级"].map(
                 lambda p: priority_label(p, lang)
@@ -99,7 +108,7 @@ def _style_workbook(wb, lang: str, data_rows: int) -> None:
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    priority_col_idx = 5
+    priority_col_idx = 6
     for row_idx in range(2, data_rows + 2):
         pri_cell = ws.cell(row=row_idx, column=priority_col_idx)
         pri_val = str(pri_cell.value or "")
@@ -111,20 +120,21 @@ def _style_workbook(wb, lang: str, data_rows: int) -> None:
         elif pri_val == high_label:
             row_fill = high_fill
         if row_fill:
-            for col in range(1, 9):
+            for col in range(1, 10):
                 ws.cell(row=row_idx, column=col).fill = row_fill
 
     ws.column_dimensions["A"].width = 42
-    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["B"].width = 14
     ws.column_dimensions["C"].width = 12
     ws.column_dimensions["D"].width = 14
-    ws.column_dimensions["E"].width = 10
-    ws.column_dimensions["F"].width = 14
-    ws.column_dimensions["G"].width = 18
-    ws.column_dimensions["H"].width = 24
+    ws.column_dimensions["E"].width = 14
+    ws.column_dimensions["F"].width = 10
+    ws.column_dimensions["G"].width = 14
+    ws.column_dimensions["H"].width = 18
+    ws.column_dimensions["I"].width = 24
     ws.freeze_panes = "A2"
 
-    shipping_col = "G"
+    shipping_col = "H"
     options = ",".join(SHIPPING_OPTIONS.get(lang, SHIPPING_OPTIONS["en"]))
     dv = DataValidation(
         type="list",

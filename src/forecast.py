@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import math
+from datetime import date, timedelta
 
 import pandas as pd
+
+# pandas Timedelta 上限约 10 万天；超大库存/极低销量需封顶避免崩溃
+MAX_DAYS_LEFT = 9999.0
 
 
 def _fill_daily_series(
@@ -56,6 +60,29 @@ def _safety_stock(daily: pd.Series, forecast_days: int, z: float) -> float:
     return z * std * math.sqrt(forecast_days)
 
 
+def _days_of_stock_left(current_stock: float, daily_rate: float) -> float | None:
+    """按加权日均销量，当前库存还能卖多少天。"""
+    if daily_rate <= 0:
+        return None
+    if current_stock <= 0:
+        return 0.0
+    days = current_stock / daily_rate
+    if not math.isfinite(days):
+        return MAX_DAYS_LEFT
+    return round(min(days, MAX_DAYS_LEFT), 1)
+
+
+def _stockout_date(end_date: pd.Timestamp, days_left: float | None) -> date | None:
+    """预计售罄日；超大天数封顶，避免 Timedelta 溢出。"""
+    if days_left is None:
+        return None
+    safe_days = int(min(max(days_left, 0), MAX_DAYS_LEFT))
+    try:
+        return end_date.date() + timedelta(days=safe_days)
+    except OverflowError:
+        return None
+
+
 def forecast_reorder(
     sales_daily: pd.DataFrame,
     inventory: pd.DataFrame,
@@ -64,6 +91,7 @@ def forecast_reorder(
     forecast_days: int,
     safety_stock_z: float,
     catalog_for_sale: dict[str, bool] | None = None,
+    catalog_skus: dict[str, str] | None = None,
     exclude_not_for_sale: bool = False,
 ) -> pd.DataFrame:
     """
@@ -82,6 +110,7 @@ def forecast_reorder(
     end_date = pd.Timestamp.today().normalize()
 
     catalog_for_sale = catalog_for_sale or {}
+    catalog_skus = catalog_skus or {}
 
     for catalog_id in sorted(all_ids):
         for_sale = catalog_for_sale.get(catalog_id, True)
@@ -101,6 +130,8 @@ def forecast_reorder(
         )
 
         reorder_qty = max(0.0, math.ceil(forecast_qty + safety - current_stock))
+        days_left = _days_of_stock_left(current_stock, daily_rate)
+        stockout_date = _stockout_date(end_date, days_left)
 
         total_sold = float(item_sales["quantity"].sum()) if not item_sales.empty else 0.0
         active_days = int((daily > 0).sum())
@@ -112,9 +143,11 @@ def forecast_reorder(
         rows.append(
             {
                 "商品名称": name,
-                "SKU_ID": catalog_id,
+                "SKU": catalog_skus.get(catalog_id, ""),
                 "在售状态": "在售" if for_sale else "停售",
                 "当前库存": int(current_stock),
+                "库存可售天数": days_left,
+                "预计售罄日": stockout_date,
                 f"近{history_days}天总销量": int(total_sold),
                 "有销售天数": active_days,
                 "日均销量(加权)": round(daily_rate, 2),

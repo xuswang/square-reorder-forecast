@@ -146,7 +146,57 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "库存 vs 预测需求（气泡大小 = 建议进货量）",
     },
     "tab_charts": {"en": "📊 Charts", "zh": "📊 图表分析"},
+    "tab_stockout": {"en": "⏳ Stock runway", "zh": "⏳ 售罄预测"},
     "tab_list": {"en": "📋 Reorder list", "zh": "📋 进货清单"},
+    "stockout_title": {"en": "Stock runway by product", "zh": "各商品预计售罄时间"},
+    "stockout_desc": {
+        "en": "Assumes **no restocking** — based on current stock and weighted daily sales only. "
+        "Sorted by estimated stockout date (earliest first).",
+        "zh": "假设 **完全不补货** — 仅根据当前库存和加权日均销量估算。"
+        "按 **预计售罄日期** 升序排列（最早卖完的在最前）。",
+    },
+    "stockout_no_restock_banner": {
+        "en": "📌 No-restock scenario: when each product is expected to sell out at the current sales rate.",
+        "zh": "📌 零补货场景：在不进货的情况下，各商品预计何时卖完。",
+    },
+    "output_mode": {"en": "Output focus", "zh": "输出重点"},
+    "output_stockout_first": {
+        "en": "Stockout first (no restock)",
+        "zh": "先售罄预测（不补货）",
+    },
+    "output_full": {"en": "Full reorder forecast", "zh": "完整进货预测"},
+    "output_both": {"en": "Both", "zh": "两者都要"},
+    "output_mode_help": {
+        "en": "Choose what to show first after analysis runs",
+        "zh": "选择分析完成后优先展示的内容",
+    },
+    "show_reorder_section": {
+        "en": "Show reorder forecast & purchase list",
+        "zh": "展开查看进货预测与补货清单",
+    },
+    "stockout_sheet": {"en": "Stockout (no restock)", "zh": "售罄预测(不补货)"},
+    "stockout_filename": {
+        "en": "stockout_no_restock_{ts}.xlsx",
+        "zh": "售罄预测_不补货_{ts}.xlsx",
+    },
+    "stockout_saved": {
+        "en": "Stockout list auto-saved: `{path}`",
+        "zh": "售罄预测已自动保存：`{path}`",
+    },
+    "stockout_search": {"en": "Search products", "zh": "搜索商品"},
+    "stockout_only_with_date": {
+        "en": "Only products with an estimate",
+        "zh": "仅显示可估算的商品",
+    },
+    "stockout_count": {
+        "en": "Showing {shown} products · {urgent} out of stock or within 7 days",
+        "zh": "共 {shown} 种商品 · {urgent} 种已断货或 7 天内售罄",
+    },
+    "stockout_download": {
+        "en": "⬇️ Download stock runway CSV",
+        "zh": "⬇️ 下载售罄预测 CSV",
+    },
+    "col_stockout_date": {"en": "Est. stockout date", "zh": "预计售罄日"},
     "list_title": {"en": "Reorder list", "zh": "进货清单"},
     "search_placeholder": {"en": "Filter by product name...", "zh": "输入关键词过滤..."},
     "search_label": {"en": "Search products", "zh": "搜索商品名称"},
@@ -192,14 +242,25 @@ STRINGS: dict[str, dict[str, str]] = {
     "prog_complete": {"en": "Forecast complete", "zh": "预测完成"},
     # Column headers
     "col_product": {"en": "Product", "zh": "商品名称"},
-    "col_sku": {"en": "SKU ID", "zh": "SKU_ID"},
+    "col_sku": {"en": "SKU", "zh": "SKU"},
     "col_stock": {"en": "Current stock", "zh": "当前库存"},
+    "col_days_left": {
+        "en": "Days until stockout",
+        "zh": "库存可售天数",
+    },
+    "col_days_left_na": {"en": "—", "zh": "—"},
     "col_total_sales": {"en": "Sales ({days}d)", "zh": "近{days}天总销量"},
     "col_active_days": {"en": "Days with sales", "zh": "有销售天数"},
     "col_daily_rate": {"en": "Weighted daily avg", "zh": "日均销量(加权)"},
-    "col_forecast": {"en": "Forecast demand ({days}d)", "zh": "预测{days}天需求"},
+    "col_forecast": {
+        "en": "Demand in next {days}d",
+        "zh": "未来{days}天预计销量",
+    },
     "col_safety": {"en": "Safety stock", "zh": "安全库存"},
-    "col_reorder": {"en": "Suggested reorder", "zh": "建议进货量"},
+    "col_reorder": {
+        "en": "Reorder qty (next {days}d)",
+        "zh": "建议进货量(未来{days}天)",
+    },
     "col_priority": {"en": "Priority", "zh": "优先级"},
     "col_for_sale": {"en": "For sale", "zh": "在售状态"},
     "status_for_sale": {"en": "For sale", "zh": "在售"},
@@ -245,7 +306,11 @@ STRINGS: dict[str, dict[str, str]] = {
     "mo_col_product": {"en": "Product", "zh": "产品名"},
     "mo_col_sku": {"en": "SKU", "zh": "SKU"},
     "mo_col_stock": {"en": "Current Stock", "zh": "现有库存"},
-    "mo_col_reorder": {"en": "Reorder Qty", "zh": "建议进货量"},
+    "mo_col_days_left": {"en": "Days until stockout", "zh": "库存可售天数"},
+    "mo_col_reorder": {
+        "en": "Reorder qty (forecast period)",
+        "zh": "建议进货量(预测周期)",
+    },
     "mo_col_priority": {"en": "Priority", "zh": "优先级"},
     "mo_col_lead_time": {"en": "Lead Time (days)", "zh": "到货周期(天)"},
     "mo_col_shipping": {"en": "Shipping Method", "zh": "运输方式"},
@@ -307,9 +372,11 @@ def priority_from_display(display: str, lang: str) -> str | None:
 def _internal_col_map(history_days: int, forecast_days: int) -> dict[str, str]:
     return {
         "商品名称": "col_product",
-        "SKU_ID": "col_sku",
+        "SKU": "col_sku",
         "在售状态": "col_for_sale",
         "当前库存": "col_stock",
+        "库存可售天数": "col_days_left",
+        "预计售罄日": "col_stockout_date",
         f"近{history_days}天总销量": "col_total_sales",
         "有销售天数": "col_active_days",
         "日均销量(加权)": "col_daily_rate",
@@ -339,12 +406,27 @@ def localize_dataframe(
         out["在售状态"] = out["在售状态"].map(
             lambda s: t("status_for_sale", lang) if s == "在售" else t("status_not_for_sale", lang)
         )
+    days_col = "库存可售天数"
+    if days_col in out.columns:
+        out[days_col] = out[days_col].apply(
+            lambda d: t("col_days_left_na", lang) if d is None or (isinstance(d, float) and pd.isna(d)) else d
+        )
+    stockout_col = "预计售罄日"
+    if stockout_col in out.columns:
+        out[stockout_col] = out[stockout_col].apply(
+            lambda d: t("col_days_left_na", lang)
+            if d is None or (isinstance(d, float) and pd.isna(d))
+            else pd.Timestamp(d).strftime("%Y-%m-%d")
+        )
     col_map = _internal_col_map(history_days, forecast_days)
     rename: dict[str, str] = {}
     for internal, i18n_key in col_map.items():
         if internal in out.columns:
             days = history_days if internal.startswith("近") else forecast_days
-            rename[internal] = t(i18n_key, lang, days=days)
+            if i18n_key in ("col_forecast", "col_reorder"):
+                rename[internal] = t(i18n_key, lang, days=forecast_days)
+            else:
+                rename[internal] = t(i18n_key, lang, days=days)
     return out.rename(columns=rename)
 
 

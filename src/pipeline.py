@@ -76,6 +76,7 @@ def run_forecast(
     catalog_meta = fetch_catalog_metadata(client, catalog_ids, location_id)
     catalog_names = {cid: m.name for cid, m in catalog_meta.items()}
     catalog_for_sale = {cid: m.for_sale for cid, m in catalog_meta.items()}
+    catalog_skus = {cid: m.sku for cid, m in catalog_meta.items()}
     all_product_ids = set(catalog_ids)
     excluded_count = (
         sum(1 for cid in all_product_ids if not catalog_for_sale.get(cid, True))
@@ -93,6 +94,7 @@ def run_forecast(
         forecast_days=forecast_days,
         safety_stock_z=safety_stock_z,
         catalog_for_sale=catalog_for_sale,
+        catalog_skus=catalog_skus,
         exclude_not_for_sale=exclude_not_for_sale,
     )
     on_progress(t("prog_complete", lang), 1.0)

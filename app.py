@@ -29,6 +29,11 @@ from src.i18n import (
 from src.order_export import build_must_order_df, build_must_order_excel_bytes, save_must_order_excel
 from src.pipeline import run_forecast
 from src.reporter import save_report
+from src.stockout_view import (
+    build_stockout_view,
+    save_stockout_excel,
+    stockout_excel_bytes,
+)
 
 
 def _get_lang() -> str:
@@ -65,6 +70,7 @@ def _init_form_state() -> None:
     st.session_state.forecast_days = defaults["forecast_days"]
     st.session_state.safety_stock_z = defaults["safety_stock_z"]
     st.session_state.exclude_not_for_sale = True
+    st.session_state.output_mode = "stockout_first"
     st.session_state.form_initialized = True
 
 
@@ -153,6 +159,20 @@ def render_sidebar() -> dict:
         key="exclude_not_for_sale",
     )
 
+    st.sidebar.divider()
+    st.sidebar.subheader(t("output_mode", lang))
+    st.sidebar.radio(
+        t("output_mode", lang),
+        options=["stockout_first", "full", "both"],
+        format_func=lambda m: t(
+            {"stockout_first": "output_stockout_first", "full": "output_full", "both": "output_both"}[m],
+            lang,
+        ),
+        help=t("output_mode_help", lang),
+        key="output_mode",
+        label_visibility="collapsed",
+    )
+
     run_clicked = st.sidebar.button(
         t("run_forecast", lang), type="primary", use_container_width=True,
     )
@@ -178,6 +198,7 @@ def render_sidebar() -> dict:
         "forecast_days": st.session_state.forecast_days,
         "safety_stock_z": st.session_state.safety_stock_z,
         "exclude_not_for_sale": st.session_state.exclude_not_for_sale,
+        "output_mode": st.session_state.output_mode,
         "run_clicked": run_clicked and settings is not None,
     }
 
@@ -247,6 +268,154 @@ def render_metrics(df: pd.DataFrame, forecast_days: int, meta: dict, lang: str) 
     )
 
 
+def render_stockout_panel(
+    df: pd.DataFrame,
+    history_days: int,
+    forecast_days: int,
+    lang: str,
+    *,
+    stockout_only: bool = False,
+    prominent: bool = False,
+    key_prefix: str = "stockout",
+) -> None:
+    if prominent:
+        st.info(t("stockout_no_restock_banner", lang))
+
+    st.subheader(t("stockout_title", lang))
+    st.markdown(t("stockout_desc", lang))
+
+    stockout_df = build_stockout_view(df, include_reorder=not stockout_only)
+    if stockout_df.empty:
+        st.info(t("chart_no_reorder", lang))
+        return
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        search = st.text_input(
+            t("stockout_search", lang),
+            placeholder=t("search_placeholder", lang),
+            key=f"{key_prefix}_search",
+        )
+    with col2:
+        only_estimated = st.checkbox(
+            t("stockout_only_with_date", lang),
+            value=False,
+            key=f"{key_prefix}_only_estimated",
+        )
+
+    filtered = stockout_df
+    if only_estimated:
+        filtered = filtered[filtered["预计售罄日"].notna()]
+    if search.strip():
+        filtered = filtered[
+            filtered["商品名称"].str.contains(search.strip(), case=False, na=False)
+        ]
+
+    urgent_count = int(
+        (filtered["库存可售天数"].notna() & (filtered["库存可售天数"] <= 7)).sum()
+    )
+    st.caption(t("stockout_count", lang, shown=len(filtered), urgent=urgent_count))
+
+    display = localize_dataframe(filtered, lang, history_days, forecast_days)
+    if stockout_only:
+        styled = display
+    else:
+        priority_display_col = priority_col(lang)
+        styled = display.style.map(_priority_style, subset=[priority_display_col])
+    st.dataframe(styled, use_container_width=True, height=620)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    excel_bytes = stockout_excel_bytes(
+        filtered, lang, history_days, forecast_days,
+    )
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            t("stockout_download", lang),
+            data=display.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+            file_name=f"stockout_{timestamp}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key=f"{key_prefix}_csv",
+        )
+    with col_dl2:
+        st.download_button(
+            t("stockout_download", lang) + " (Excel)",
+            data=excel_bytes,
+            file_name=t("stockout_filename", lang, ts=timestamp),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key=f"{key_prefix}_xlsx",
+        )
+
+    saved_path = st.session_state.get("stockout_saved_path")
+    if saved_path and prominent:
+        st.caption(t("stockout_saved", lang, path=saved_path))
+
+
+def render_reorder_sections(
+    df: pd.DataFrame,
+    result,
+    meta: dict,
+    lang: str,
+    *,
+    include_stockout_tab: bool = True,
+) -> None:
+    render_metrics(df, result.forecast_days, meta, lang)
+    st.divider()
+    render_must_order_panel(df, lang)
+    st.divider()
+
+    if include_stockout_tab:
+        tab_stockout, tab1, tab2 = st.tabs([
+            t("tab_stockout", lang),
+            t("tab_charts", lang),
+            t("tab_list", lang),
+        ])
+        with tab_stockout:
+            render_stockout_panel(
+                df, result.history_days, result.forecast_days, lang,
+                stockout_only=True,
+                key_prefix="stockout_tab",
+            )
+    else:
+        tab1, tab2 = st.tabs([t("tab_charts", lang), t("tab_list", lang)])
+
+    with tab1:
+        render_charts(df, result.forecast_days, result.history_days, lang)
+
+    with tab2:
+        filtered = render_table(df, result.forecast_days, result.history_days, lang)
+
+        st.divider()
+        dl1, dl2, dl3 = st.columns(3)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        export_df = localize_dataframe(
+            df, lang, result.history_days, result.forecast_days,
+        )
+
+        with dl1:
+            st.download_button(
+                t("download_excel", lang),
+                data=_to_excel_bytes(export_df, lang),
+                file_name=t("excel_filename", lang, ts=timestamp),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        with dl2:
+            st.download_button(
+                t("download_csv", lang),
+                data=filtered.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+                file_name=t("csv_filename", lang, ts=timestamp),
+                mime="text/csv",
+                use_container_width=True,
+            )
+        with dl3:
+            if st.button(t("save_output", lang), use_container_width=True):
+                path = save_report(df, "output")
+                st.success(t("saved_to", lang, path=path))
+
+
 def render_charts(
     df: pd.DataFrame,
     forecast_days: int,
@@ -288,7 +457,7 @@ def render_charts(
             category_orders={t("chart_priority", lang): display_order},
         )
         fig.update_traces(textposition="inside", textinfo="percent+label")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_priority_pie")
 
     with col2:
         top = need.nlargest(15, reorder_col)
@@ -303,7 +472,7 @@ def render_charts(
             category_orders={priority_col_name: display_order},
         )
         fig.update_layout(yaxis={"categoryorder": "total ascending"}, height=480)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_top15_bar")
 
     scatter = need.nlargest(200, reorder_col)
     stock_col = t("col_stock", lang)
@@ -318,7 +487,7 @@ def render_charts(
         color_discrete_map=color_map,
         category_orders={priority_col_name: display_order},
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="chart_scatter_stock")
 
 
 def render_table(df: pd.DataFrame, forecast_days: int, history_days: int, lang: str) -> pd.DataFrame:
@@ -411,6 +580,13 @@ def main() -> None:
             st.session_state.must_order_saved_path = save_must_order_excel(
                 result.df, lang, "output",
             )
+            st.session_state.stockout_saved_path = save_stockout_excel(
+                result.df,
+                lang,
+                result.history_days,
+                result.forecast_days,
+                "output",
+            )
             progress.progress(1.0, text=t("done", lang))
             status.success(t("forecast_complete", lang))
         except Exception as exc:
@@ -447,46 +623,40 @@ def main() -> None:
         "excluded_not_for_sale": result.excluded_not_for_sale,
     }
 
-    render_metrics(df, result.forecast_days, meta, lang)
-    st.divider()
-    render_must_order_panel(df, lang)
-    st.divider()
+    output_mode = opts.get("output_mode", st.session_state.get("output_mode", "stockout_first"))
 
-    tab1, tab2 = st.tabs([t("tab_charts", lang), t("tab_list", lang)])
-
-    with tab1:
-        render_charts(df, result.forecast_days, result.history_days, lang)
-
-    with tab2:
-        filtered = render_table(df, result.forecast_days, result.history_days, lang)
-
+    if output_mode == "stockout_first":
+        with st.container(border=True):
+            render_stockout_panel(
+                df,
+                result.history_days,
+                result.forecast_days,
+                lang,
+                stockout_only=True,
+                prominent=True,
+                key_prefix="stockout_main",
+            )
+        with st.expander(t("show_reorder_section", lang), expanded=False):
+            render_reorder_sections(
+                df, result, meta, lang, include_stockout_tab=False,
+            )
+    elif output_mode == "full":
+        render_reorder_sections(df, result, meta, lang)
+    else:
+        with st.container(border=True):
+            render_stockout_panel(
+                df,
+                result.history_days,
+                result.forecast_days,
+                lang,
+                stockout_only=True,
+                prominent=True,
+                key_prefix="stockout_main",
+            )
         st.divider()
-        dl1, dl2, dl3 = st.columns(3)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        export_df = localize_dataframe(
-            df, lang, result.history_days, result.forecast_days,
+        render_reorder_sections(
+            df, result, meta, lang, include_stockout_tab=False,
         )
-
-        with dl1:
-            st.download_button(
-                t("download_excel", lang),
-                data=_to_excel_bytes(export_df, lang),
-                file_name=t("excel_filename", lang, ts=timestamp),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-        with dl2:
-            st.download_button(
-                t("download_csv", lang),
-                data=filtered.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
-                file_name=t("csv_filename", lang, ts=timestamp),
-                mime="text/csv",
-                use_container_width=True,
-            )
-        with dl3:
-            if st.button(t("save_output", lang), use_container_width=True):
-                path = save_report(df, "output")
-                st.success(t("saved_to", lang, path=path))
 
     render_footer(lang)
 
