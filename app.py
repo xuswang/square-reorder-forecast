@@ -20,10 +20,14 @@ from src.i18n import (
     localize_dataframe,
     priority_col,
     priority_display_order,
-    priority_from_display,
     priority_label,
     product_col,
     t,
+)
+from src.catalog_reorder import (
+    CatalogReorderResult,
+    build_from_uploads,
+    catalog_reorder_excel_bytes,
 )
 from src.order_export import build_must_order_df, build_must_order_excel_bytes, save_must_order_excel
 from src.pipeline import run_forecast
@@ -70,6 +74,10 @@ def _init_form_state() -> None:
     st.session_state.safety_stock_z = defaults["safety_stock_z"]
     st.session_state.exclude_not_for_sale = True
     st.session_state.output_mode = "stockout_first"
+    st.session_state.priority_filter = ["紧急", "高", "中"]
+    st.session_state.reorder_list_only_reorder = True
+    st.session_state.catalog_include_forecast = True
+    st.session_state.catalog_oos_default_qty = 20
     st.session_state.form_initialized = True
 
 
@@ -82,11 +90,71 @@ def _translate_config_error(exc: ValueError, lang: str) -> str:
     return code
 
 
+def _translate_catalog_error(exc: ValueError, lang: str) -> str:
+    code = str(exc)
+    mapping = {
+        "ERR_CATALOG_EMPTY": "err_catalog_empty",
+        "ERR_CATALOG_COLUMNS": "err_catalog_columns",
+        "ERR_SKIP_EMPTY": "err_skip_empty",
+        "ERR_SKIP_COLUMNS": "err_skip_columns",
+    }
+    key = mapping.get(code)
+    return t(key, lang) if key else str(exc)
+
+
 def render_footer(lang: str) -> None:
     st.markdown("---")
     st.markdown(
         f'<p style="text-align:center;color:#888;font-size:0.85rem;margin-top:1rem;">'
         f'{t("copyright", lang)}</p>',
+        unsafe_allow_html=True,
+    )
+
+
+def _inject_compact_layout_css() -> None:
+    """收紧 Streamlit 默认的页面边缘留白。"""
+    st.markdown(
+        """
+        <style>
+        /* 主内容区 */
+        [data-testid="stMainBlockContainer"] {
+            padding-top: 0.5rem;
+            padding-bottom: 0.75rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+            max-width: 100%;
+        }
+        /* 侧边栏 */
+        [data-testid="stSidebar"] > div:first-child {
+            padding-top: 0.5rem;
+            padding-left: 0.75rem;
+            padding-right: 0.75rem;
+        }
+        [data-testid="stSidebarHeader"] {
+            padding-top: 0.25rem;
+            padding-bottom: 0.25rem;
+        }
+        /* 顶部工具栏占位 */
+        header[data-testid="stHeader"] {
+            height: 2rem;
+            background: transparent;
+        }
+        /* 标题与副标题 */
+        h1 {
+            padding-top: 0;
+            margin-top: 0;
+            margin-bottom: 0.25rem;
+        }
+        [data-testid="stCaptionContainer"] {
+            margin-top: 0;
+        }
+        /* 区块默认间距 */
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            margin-top: 0.25rem;
+            margin-bottom: 0.25rem;
+        }
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
@@ -298,7 +366,6 @@ def render_stockout_panel(
     with col2:
         only_estimated = st.checkbox(
             t("stockout_only_with_date", lang),
-            value=False,
             key=f"{key_prefix}_only_estimated",
         )
 
@@ -492,23 +559,25 @@ def render_charts(
 def render_table(df: pd.DataFrame, forecast_days: int, history_days: int, lang: str) -> pd.DataFrame:
     st.subheader(t("list_title", lang))
 
-    display_order = priority_display_order(lang)
-    default_filter = display_order[:3]
-
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         search = st.text_input(
             t("search_label", lang),
             placeholder=t("search_placeholder", lang),
+            key="reorder_list_search",
         )
     with col2:
         priority_filter = st.multiselect(
             t("priority_filter", lang),
-            display_order,
-            default=default_filter,
+            options=PRIORITY_ORDER_INTERNAL,
+            format_func=lambda p: priority_label(p, lang),
+            key="priority_filter",
         )
     with col3:
-        only_reorder = st.checkbox(t("only_reorder", lang), value=True)
+        only_reorder = st.checkbox(
+            t("only_reorder", lang),
+            key="reorder_list_only_reorder",
+        )
 
     internal_df = df.copy()
     reorder_col = "建议进货量"
@@ -519,10 +588,7 @@ def render_table(df: pd.DataFrame, forecast_days: int, history_days: int, lang: 
     if only_reorder:
         filtered = filtered[filtered[reorder_col] > 0]
     if priority_filter:
-        internal_priorities = [
-            p for p in (priority_from_display(d, lang) for d in priority_filter) if p
-        ]
-        filtered = filtered[filtered[priority_internal_col].isin(internal_priorities)]
+        filtered = filtered[filtered[priority_internal_col].isin(priority_filter)]
     if search.strip():
         filtered = filtered[
             filtered[product_internal_col].str.contains(search.strip(), case=False, na=False)
@@ -538,6 +604,105 @@ def render_table(df: pd.DataFrame, forecast_days: int, history_days: int, lang: 
     return display_df
 
 
+def render_catalog_reorder_section(lang: str, forecast_df: pd.DataFrame | None) -> None:
+    """上传库存 + 不必进货表，生成建议进货清单。"""
+    with st.expander(t("catalog_reorder_title", lang), expanded=False):
+        st.markdown(t("catalog_reorder_desc", lang))
+        up1, up2 = st.columns(2)
+        with up1:
+            catalog_file = st.file_uploader(
+                t("catalog_upload", lang),
+                type=["xlsx", "xls", "csv"],
+                help=t("catalog_upload_help", lang),
+                key="catalog_upload_file",
+            )
+        with up2:
+            skip_file = st.file_uploader(
+                t("skip_upload", lang),
+                type=["xlsx", "xls", "csv"],
+                help=t("skip_upload_help", lang),
+                key="skip_upload_file",
+            )
+
+        opt1, opt2 = st.columns(2)
+        with opt1:
+            has_forecast = forecast_df is not None and not forecast_df.empty
+            st.checkbox(
+                t("catalog_include_forecast", lang),
+                disabled=not has_forecast,
+                key="catalog_include_forecast",
+            )
+        with opt2:
+            st.number_input(
+                t("catalog_oos_default", lang),
+                min_value=1,
+                max_value=500,
+                step=1,
+                key="catalog_oos_default_qty",
+            )
+
+        if st.button(
+            t("catalog_reorder_generate", lang),
+            type="secondary",
+            use_container_width=True,
+            key="catalog_reorder_generate_btn",
+        ):
+            if catalog_file is None or skip_file is None:
+                st.error(t("catalog_reorder_need_files", lang))
+            else:
+                try:
+                    result = build_from_uploads(
+                        catalog_file.getvalue(),
+                        catalog_file.name,
+                        skip_file.getvalue(),
+                        skip_file.name,
+                        forecast_df=forecast_df if st.session_state.catalog_include_forecast else None,
+                        lang=lang,
+                        oos_default_qty=int(st.session_state.catalog_oos_default_qty),
+                        include_forecast_must_order=st.session_state.catalog_include_forecast,
+                    )
+                    st.session_state.catalog_reorder_result = result
+                except ValueError as exc:
+                    st.error(t("catalog_reorder_failed", lang, error=_translate_catalog_error(exc, lang)))
+                except Exception as exc:
+                    st.error(t("catalog_reorder_failed", lang, error=exc))
+
+    result: CatalogReorderResult | None = st.session_state.get("catalog_reorder_result")
+    if result is None:
+        return
+
+    reorder_col = t("cr_col_reorder", lang)
+    total_skus = len(result.all_items)
+    total_units = int(result.all_items[reorder_col].sum()) if total_skus else 0
+    st.success(t("catalog_reorder_done", lang, skus=total_skus, units=total_units))
+
+    tab_must, tab_oos, tab_all, tab_skip = st.tabs([
+        t("tab_cr_must", lang),
+        t("tab_cr_oos", lang),
+        t("tab_cr_all", lang),
+        t("tab_cr_skip", lang),
+    ])
+    with tab_must:
+        st.dataframe(result.must_order, use_container_width=True, height=360)
+    with tab_oos:
+        st.dataframe(result.out_of_stock, use_container_width=True, height=360)
+    with tab_all:
+        st.dataframe(result.all_items, use_container_width=True, height=420)
+    with tab_skip:
+        st.dataframe(result.skipped, use_container_width=True, height=360)
+        st.dataframe(result.summary, use_container_width=True, hide_index=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    st.download_button(
+        t("catalog_reorder_download", lang),
+        data=catalog_reorder_excel_bytes(result, lang),
+        file_name=t("catalog_reorder_filename", lang, ts=timestamp),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="catalog_reorder_download_btn",
+    )
+
+
 def main() -> None:
     st.set_page_config(
         page_title=t("page_title", DEFAULT_LANG),
@@ -545,6 +710,7 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
+    _inject_compact_layout_css()
 
     _init_form_state()
 
@@ -608,8 +774,10 @@ def main() -> None:
             {t("feature_1", lang)}
             {t("feature_2", lang)}
             {t("feature_3", lang)}
+            {t("feature_4", lang)}
             """
         )
+        render_catalog_reorder_section(lang, None)
         render_footer(lang)
         return
 
@@ -657,6 +825,7 @@ def main() -> None:
             df, result, meta, lang, include_stockout_tab=False,
         )
 
+    render_catalog_reorder_section(lang, df)
     render_footer(lang)
 
 

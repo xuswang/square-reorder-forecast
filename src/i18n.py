@@ -125,6 +125,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "- Search, filter, charts, and Excel export",
         "zh": "- 支持搜索、筛选、图表分析与 Excel 导出",
     },
+    "feature_4": {
+        "en": "- Upload catalog + stockout skip-list to build a reorder table",
+        "zh": "- 可上传当前库存与不必进货表，生成进货清单",
+    },
     "metric_total_products": {"en": "Total products", "zh": "商品总数"},
     "metric_need_reorder": {"en": "Need reorder", "zh": "需要进货"},
     "metric_urgent_high": {"en": "Urgent / High", "zh": "紧急/高优先"},
@@ -333,6 +337,110 @@ STRINGS: dict[str, dict[str, str]] = {
     "mo_shipping_validation": {
         "en": "Please choose a shipping method from the list",
         "zh": "请从列表中选择运输方式",
+    },
+    # Catalog upload reorder
+    "catalog_reorder_title": {
+        "en": "📁 Reorder from uploaded files",
+        "zh": "📁 从上传文件生成进货表",
+    },
+    "catalog_reorder_desc": {
+        "en": "Upload your **current Square catalog/inventory export** and a **stockout / no-restock summary** "
+        "(items you do not need to reorder). The app refreshes stock from the catalog file and builds a reorder list.",
+        "zh": "上传 **Square 当前库存/目录导出**，以及 **不必进货的售罄预测表**。"
+        "程序会用最新库存刷新数量，并生成建议进货清单。",
+    },
+    "catalog_upload": {
+        "en": "Current inventory (Square catalog export)",
+        "zh": "当前库存（Square 目录导出）",
+    },
+    "catalog_upload_help": {
+        "en": "Square Items export (.xlsx), e.g. MLPZDGGATZWH5_catalog-YYYY-MM-DD.xlsx",
+        "zh": "Square 商品导出 Excel，如 MLPZDGGATZWH5_catalog-日期.xlsx",
+    },
+    "skip_upload": {
+        "en": "No-reorder reference (stockout summary)",
+        "zh": "不必进货参考（售罄预测表）",
+    },
+    "skip_upload_help": {
+        "en": "Stock runway export from this app or similar (.xlsx)",
+        "zh": "本应用导出的售罄预测表，或同格式 Excel",
+    },
+    "catalog_include_forecast": {
+        "en": "Include must-order items from last forecast (refresh stock from upload)",
+        "zh": "合并上次预测的必须下单项（用上传库存刷新数量）",
+    },
+    "catalog_oos_default": {
+        "en": "Default reorder qty for out-of-stock (no forecast)",
+        "zh": "缺货商品默认建议进货量",
+    },
+    "catalog_reorder_generate": {
+        "en": "Generate reorder list",
+        "zh": "生成进货清单",
+    },
+    "catalog_reorder_need_files": {
+        "en": "Please upload both files before generating.",
+        "zh": "请先上传两个文件再生成。",
+    },
+    "catalog_reorder_done": {
+        "en": "Generated {skus} SKUs · {units:,} units suggested",
+        "zh": "已生成 {skus} 种商品 · 建议进货 {units:,} 件",
+    },
+    "catalog_reorder_failed": {
+        "en": "Failed to build reorder list: {error}",
+        "zh": "生成进货清单失败：{error}",
+    },
+    "catalog_reorder_download": {
+        "en": "⬇️ Download reorder Excel",
+        "zh": "⬇️ 下载进货清单 Excel",
+    },
+    "catalog_reorder_filename": {
+        "en": "reorder_from_upload_{ts}.xlsx",
+        "zh": "上传进货清单_{ts}.xlsx",
+    },
+    "tab_cr_must": {"en": "Must order", "zh": "预测必须下单"},
+    "tab_cr_oos": {"en": "Out of stock", "zh": "缺货补货"},
+    "tab_cr_all": {"en": "All", "zh": "全部"},
+    "tab_cr_skip": {"en": "Skipped", "zh": "已排除"},
+    "cr_col_product": {"en": "Product", "zh": "商品名称"},
+    "cr_col_sku": {"en": "SKU", "zh": "SKU"},
+    "cr_col_stock": {"en": "Current stock (upload)", "zh": "当前库存(上传)"},
+    "cr_col_stock_skip": {"en": "Stock (reference)", "zh": "库存(参考)"},
+    "cr_col_reorder": {"en": "Suggested reorder qty", "zh": "建议进货量"},
+    "cr_col_priority": {"en": "Priority", "zh": "优先级"},
+    "cr_col_vendor": {"en": "Vendor", "zh": "供应商"},
+    "cr_col_source": {"en": "Source", "zh": "来源"},
+    "cr_col_days_left": {"en": "Days until stockout", "zh": "库存可售天数"},
+    "cr_col_daily_rate": {"en": "Weighted daily avg", "zh": "日均销量(加权)"},
+    "source_forecast": {"en": "Forecast must-order", "zh": "预测必须下单"},
+    "source_oos": {"en": "Out of stock (catalog)", "zh": "目录缺货"},
+    "cr_sheet_must": {"en": "Must order", "zh": "必须下单"},
+    "cr_sheet_oos": {"en": "Out of stock", "zh": "缺货补货"},
+    "cr_sheet_all": {"en": "All reorder", "zh": "全部进货"},
+    "cr_sheet_skip": {"en": "Skip list", "zh": "不必进货"},
+    "cr_sheet_summary": {"en": "Summary", "zh": "摘要"},
+    "cr_summary_metric": {"en": "Metric", "zh": "项目"},
+    "cr_summary_value": {"en": "Value", "zh": "数值"},
+    "cr_summary_catalog_rows": {"en": "Catalog rows", "zh": "目录行数"},
+    "cr_summary_skip_rows": {"en": "Skip-list rows", "zh": "不必进货行数"},
+    "cr_summary_must_rows": {"en": "Must-order rows", "zh": "必须下单行数"},
+    "cr_summary_oos_rows": {"en": "Out-of-stock rows", "zh": "缺货补货行数"},
+    "cr_summary_total_skus": {"en": "Total SKUs to reorder", "zh": "建议进货 SKU 数"},
+    "cr_summary_total_units": {"en": "Total units suggested", "zh": "建议进货总件数"},
+    "err_catalog_empty": {
+        "en": "Catalog file is empty or unreadable",
+        "zh": "库存文件为空或无法读取",
+    },
+    "err_catalog_columns": {
+        "en": "Catalog file is missing required columns (Item Name, Current Quantity)",
+        "zh": "库存文件缺少必要列（商品名称、当前库存）",
+    },
+    "err_skip_empty": {
+        "en": "Skip-list file is empty or unreadable",
+        "zh": "不必进货文件为空或无法读取",
+    },
+    "err_skip_columns": {
+        "en": "Skip-list file is missing a Product / item name column",
+        "zh": "不必进货文件缺少商品名称列",
     },
 }
 
